@@ -14,13 +14,13 @@ import (
 
 // Jenkins credentials and details
 const (
-	jenkinsCLIPath = "C:\\Work\\Jenkins\\jenkins-cli.jar" // Path to jenkins-cli.jar
-	jenkinsURL     = "http://localhost:8080"
-	jenkinsUser    = "admin"
-	jenkinsToken   = "11a7268638fc8b31561e15d52956b935b2"
-	pluginName     = "checkmarx"
-	pluginPath     = "C:\\Work\\Hardik\\checkmarx-plugin\\build\\libs\\checkmarx.hpi"
-	jenkinsWarPath = "C:\\Work\\Jenkins\\jenkins.war"
+	jenkinsCLIPath = "" // Path to jenkins-cli.jar
+	jenkinsURL     = "" // Jenkins URL
+	jenkinsUser    = "" // Jenkins username
+	jenkinsToken   = "" // Jenkins API token
+	pluginName     = "" // Plugin name
+	pluginPath     = "" // Path to the new plugin .hpi file
+	jenkinsWarPath = "" // Path to jenkins.war
 )
 
 func isPluginInstalled() (bool, error) {
