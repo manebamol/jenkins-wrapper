@@ -3,27 +3,24 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
-	_ "io"
-	_ "mime/multipart"
 	"net/http"
-	_ "os"
+	"os"
 	"os/exec"
 	"time"
 )
 
-// Jenkins credentials and details
-const (
-	jenkinsCLIPath = "C:\\Work\\Jenkins\\jenkins-cli.jar" // Path to jenkins-cli.jar
-	jenkinsURL     = "http://localhost:8080"
-	jenkinsUser    = "admin"
-	jenkinsToken   = "11a7268638fc8b31561e15d52956b935b2"
-	pluginName     = "checkmarx"
-	pluginPath     = "C:\\Work\\Hardik\\checkmarx-plugin\\build\\libs\\checkmarx.hpi"
-	jenkinsWarPath = "C:\\Work\\Jenkins\\jenkins.war"
-)
+func isJenkinsRunning(jenkinsURL string) bool {
+	resp, err := http.Get(jenkinsURL + "/login")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == 200
+}
 
-func isPluginInstalled() (bool, error) {
+func isPluginInstalled(jenkinsURL, jenkinsUser, jenkinsToken, pluginName string) (bool, error) {
 	url := fmt.Sprintf("%s/pluginManager/api/json?depth=1", jenkinsURL)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -31,7 +28,7 @@ func isPluginInstalled() (bool, error) {
 	}
 	req.SetBasicAuth(jenkinsUser, jenkinsToken)
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
@@ -61,8 +58,8 @@ func isPluginInstalled() (bool, error) {
 	return false, nil
 }
 
-func uninstallPlugin() error {
-	installed, err := isPluginInstalled()
+func uninstallPlugin(jenkinsURL, jenkinsUser, jenkinsToken, pluginName string) error {
+	installed, err := isPluginInstalled(jenkinsURL, jenkinsUser, jenkinsToken, pluginName)
 	if err != nil {
 		return err
 	}
@@ -79,7 +76,7 @@ func uninstallPlugin() error {
 	req.SetBasicAuth(jenkinsUser, jenkinsToken)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -94,7 +91,7 @@ func uninstallPlugin() error {
 	return nil
 }
 
-func installPlugin() error {
+func installPlugin(jenkinsCLIPath, jenkinsURL, jenkinsUser, jenkinsToken, pluginPath string) error {
 	cmd := exec.Command("java", "-jar", jenkinsCLIPath, "-s", jenkinsURL, "-auth", fmt.Sprintf("%s:%s", jenkinsUser, jenkinsToken), "install-plugin", fmt.Sprintf("file:///%s", pluginPath))
 
 	output, err := cmd.CombinedOutput()
@@ -107,8 +104,8 @@ func installPlugin() error {
 	return nil
 }
 
-func stopJenkins() error {
-	client := &http.Client{}
+func stopJenkins(jenkinsURL, jenkinsUser, jenkinsToken string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest("POST", fmt.Sprintf("%s/exit", jenkinsURL), nil)
 	if err != nil {
 		return err
@@ -129,7 +126,7 @@ func stopJenkins() error {
 	return nil
 }
 
-func startJenkins() error {
+func startJenkins(jenkinsWarPath string) error {
 	cmd := exec.Command("cmd", "/C", "start", "java", "-jar", jenkinsWarPath)
 	err := cmd.Start()
 	if err != nil {
@@ -139,7 +136,7 @@ func startJenkins() error {
 	return nil
 }
 
-func waitForJenkins() error {
+func waitForJenkins(jenkinsURL string) error {
 	fmt.Println("⏳ Waiting for Jenkins to restart...")
 
 	retries := 30 // Maximum wait time: 30 seconds
@@ -156,11 +153,42 @@ func waitForJenkins() error {
 }
 
 func main() {
+	// Define command-line flags
+	jenkinsCLIPath := flag.String("jenkinsCLIPath", "", "Path to jenkins-cli.jar")
+	jenkinsURL := flag.String("jenkinsURL", "", "Jenkins URL")
+	jenkinsUser := flag.String("jenkinsUser", "", "Jenkins user")
+	jenkinsToken := flag.String("jenkinsToken", "", "Jenkins token")
+	pluginName := flag.String("pluginName", "", "Plugin name")
+	pluginPath := flag.String("pluginPath", "", "Path to plugin file")
+	jenkinsWarPath := flag.String("jenkinsWarPath", "", "Path to jenkins.war")
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExample:\n")
+		fmt.Fprintf(os.Stderr, "  %s -jenkinsCLIPath=C:\\path\\to\\jenkins-cli.jar -jenkinsURL=http://localhost:8080 -jenkinsUser=admin -jenkinsToken=1234567890abcdef -pluginName=my-plugin -pluginPath=C:\\path\\to\\plugin.hpi -jenkinsWarPath=C:\\path\\to\\jenkins.war\n", os.Args[0])
+	}
+
+	// Parse command-line flags
+	flag.Parse()
+
+	// Check if required flags are provided
+	if *jenkinsCLIPath == "" || *jenkinsURL == "" || *jenkinsUser == "" || *jenkinsToken == "" || *pluginName == "" || *pluginPath == "" || *jenkinsWarPath == "" {
+		fmt.Println("All flags are required")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if !isJenkinsRunning(*jenkinsURL) {
+		fmt.Println("❌ Jenkins is not running. Please start Jenkins and try again.")
+		os.Exit(1)
+	}
+
 	fmt.Println("🔄 Starting Jenkins plugin update process...")
 
 	// Step 1: Uninstall the old plugin if it exists
 	fmt.Println("🛑 Checking if plugin exists...")
-	if err := uninstallPlugin(); err != nil {
+	if err := uninstallPlugin(*jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginName); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -168,14 +196,14 @@ func main() {
 	time.Sleep(5 * time.Second)
 
 	fmt.Println("⬆️ Uploading new plugin...")
-	if err := installPlugin(); err != nil {
+	if err := installPlugin(*jenkinsCLIPath, *jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginPath); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
 	// Step 2: Stop Jenkins using API
 	fmt.Println("🛑 Stopping Jenkins...")
-	if err := stopJenkins(); err != nil {
+	if err := stopJenkins(*jenkinsURL, *jenkinsUser, *jenkinsToken); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -185,7 +213,7 @@ func main() {
 
 	// Step 3: Start Jenkins
 	fmt.Println("🚀 Starting Jenkins...")
-	if err := startJenkins(); err != nil {
+	if err := startJenkins(*jenkinsWarPath); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -193,14 +221,14 @@ func main() {
 	fmt.Println("🎉 Plugin update process completed successfully!")
 
 	// Wait for Jenkins to restart
-	if err := waitForJenkins(); err != nil {
+	if err := waitForJenkins(*jenkinsURL); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
 	// Step 4: Check if the plugin is successfully installed
 	time.Sleep(10 * time.Second)
-	installed, err := isPluginInstalled()
+	installed, err := isPluginInstalled(*jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginName)
 	if err != nil {
 		fmt.Println("Error checking installation:", err)
 	} else if installed {
