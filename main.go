@@ -9,7 +9,31 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/joho/godotenv"
 )
+
+// LoadEnv loads environment variables from a .env file
+func LoadEnv() error {
+	return godotenv.Load(".env")
+}
+
+// SaveEnv saves environment variables to a .env file
+func SaveEnv(envMap map[string]string) error {
+	file, err := os.OpenFile(".env", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	for key, value := range envMap {
+		_, err := file.WriteString(fmt.Sprintf("%s=%s\n", key, value))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func isJenkinsRunning(jenkinsURL string) bool {
 	resp, err := http.Get(jenkinsURL + "/login")
@@ -99,8 +123,9 @@ func installPlugin(jenkinsCLIPath, jenkinsURL, jenkinsUser, jenkinsToken, plugin
 		return fmt.Errorf("command execution failed: %v\nOutput: %s", err, output)
 	}
 
-	fmt.Println("✅ Plugin installed successfully!")
 	fmt.Println(string(output))
+	fmt.Println("✅ Plugin installed successfully!")
+
 	return nil
 }
 
@@ -153,14 +178,20 @@ func waitForJenkins(jenkinsURL string) error {
 }
 
 func main() {
+	// Load environment variables from .env file
+	err := LoadEnv()
+	if err != nil {
+		fmt.Println("Error loading .env file:", err)
+	}
+
 	// Define command-line flags
-	jenkinsCLIPath := flag.String("jenkinsCLIPath", "", "Path to jenkins-cli.jar")
-	jenkinsURL := flag.String("jenkinsURL", "", "Jenkins URL")
-	jenkinsUser := flag.String("jenkinsUser", "", "Jenkins user")
-	jenkinsToken := flag.String("jenkinsToken", "", "Jenkins token")
-	pluginName := flag.String("pluginName", "", "Plugin name")
-	pluginPath := flag.String("pluginPath", "", "Path to plugin file")
-	jenkinsWarPath := flag.String("jenkinsWarPath", "", "Path to jenkins.war")
+	jenkinsCLIPath := flag.String("jenkinsCLIPath", os.Getenv("JENKINS_CLI_PATH"), "Path to jenkins-cli.jar")
+	jenkinsURL := flag.String("jenkinsURL", os.Getenv("JENKINS_URL"), "Jenkins URL")
+	jenkinsUser := flag.String("jenkinsUser", os.Getenv("JENKINS_USER"), "Jenkins user")
+	jenkinsToken := flag.String("jenkinsToken", os.Getenv("JENKINS_TOKEN"), "Jenkins token")
+	pluginName := flag.String("pluginName", os.Getenv("PLUGIN_NAME"), "Plugin name")
+	pluginPath := flag.String("pluginPath", os.Getenv("PLUGIN_PATH"), "Path to plugin file")
+	jenkinsWarPath := flag.String("jenkinsWarPath", os.Getenv("JENKINS_WAR_PATH"), "Path to jenkins.war")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
@@ -172,14 +203,54 @@ func main() {
 	// Parse command-line flags
 	flag.Parse()
 
-	// Check if required flags are provided
-	if *jenkinsCLIPath == "" || *jenkinsURL == "" || *jenkinsUser == "" || *jenkinsToken == "" || *pluginName == "" || *pluginPath == "" || *jenkinsWarPath == "" {
+	// Load existing environment variables
+	envMap := map[string]string{
+		"JENKINS_CLI_PATH": os.Getenv("JENKINS_CLI_PATH"),
+		"JENKINS_URL":      os.Getenv("JENKINS_URL"),
+		"JENKINS_USER":     os.Getenv("JENKINS_USER"),
+		"JENKINS_TOKEN":    os.Getenv("JENKINS_TOKEN"),
+		"PLUGIN_NAME":      os.Getenv("PLUGIN_NAME"),
+		"PLUGIN_PATH":      os.Getenv("PLUGIN_PATH"),
+		"JENKINS_WAR_PATH": os.Getenv("JENKINS_WAR_PATH"),
+	}
+
+	// Update environment variables with provided flags
+	if *jenkinsCLIPath != "" {
+		envMap["JENKINS_CLI_PATH"] = *jenkinsCLIPath
+	}
+	if *jenkinsURL != "" {
+		envMap["JENKINS_URL"] = *jenkinsURL
+	}
+	if *jenkinsUser != "" {
+		envMap["JENKINS_USER"] = *jenkinsUser
+	}
+	if *jenkinsToken != "" {
+		envMap["JENKINS_TOKEN"] = *jenkinsToken
+	}
+	if *pluginName != "" {
+		envMap["PLUGIN_NAME"] = *pluginName
+	}
+	if *pluginPath != "" {
+		envMap["PLUGIN_PATH"] = *pluginPath
+	}
+	if *jenkinsWarPath != "" {
+		envMap["JENKINS_WAR_PATH"] = *jenkinsWarPath
+	}
+
+	// Save updated environment variables to .env file
+	err = SaveEnv(envMap)
+	if err != nil {
+		fmt.Println("Error saving .env file:", err)
+	}
+
+	// Check if required environment variables are set
+	if envMap["JENKINS_CLI_PATH"] == "" || envMap["JENKINS_URL"] == "" || envMap["JENKINS_USER"] == "" || envMap["JENKINS_TOKEN"] == "" || envMap["PLUGIN_NAME"] == "" || envMap["PLUGIN_PATH"] == "" || envMap["JENKINS_WAR_PATH"] == "" {
 		fmt.Println("All flags are required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	if !isJenkinsRunning(*jenkinsURL) {
+	if !isJenkinsRunning(envMap["JENKINS_URL"]) {
 		fmt.Println("❌ Jenkins is not running. Please start Jenkins and try again.")
 		os.Exit(1)
 	}
@@ -188,7 +259,7 @@ func main() {
 
 	// Step 1: Uninstall the old plugin if it exists
 	fmt.Println("🛑 Checking if plugin exists...")
-	if err := uninstallPlugin(*jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginName); err != nil {
+	if err := uninstallPlugin(envMap["JENKINS_URL"], envMap["JENKINS_USER"], envMap["JENKINS_TOKEN"], envMap["PLUGIN_NAME"]); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -196,14 +267,14 @@ func main() {
 	time.Sleep(5 * time.Second)
 
 	fmt.Println("⬆️ Uploading new plugin...")
-	if err := installPlugin(*jenkinsCLIPath, *jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginPath); err != nil {
+	if err := installPlugin(envMap["JENKINS_CLI_PATH"], envMap["JENKINS_URL"], envMap["JENKINS_USER"], envMap["JENKINS_TOKEN"], envMap["PLUGIN_PATH"]); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
 	// Step 2: Stop Jenkins using API
 	fmt.Println("🛑 Stopping Jenkins...")
-	if err := stopJenkins(*jenkinsURL, *jenkinsUser, *jenkinsToken); err != nil {
+	if err := stopJenkins(envMap["JENKINS_URL"], envMap["JENKINS_USER"], envMap["JENKINS_TOKEN"]); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -213,7 +284,7 @@ func main() {
 
 	// Step 3: Start Jenkins
 	fmt.Println("🚀 Starting Jenkins...")
-	if err := startJenkins(*jenkinsWarPath); err != nil {
+	if err := startJenkins(envMap["JENKINS_WAR_PATH"]); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
@@ -221,14 +292,14 @@ func main() {
 	fmt.Println("🎉 Plugin update process completed successfully!")
 
 	// Wait for Jenkins to restart
-	if err := waitForJenkins(*jenkinsURL); err != nil {
+	if err := waitForJenkins(envMap["JENKINS_URL"]); err != nil {
 		fmt.Println("Error:", err)
 		return
 	}
 
 	// Step 4: Check if the plugin is successfully installed
 	time.Sleep(10 * time.Second)
-	installed, err := isPluginInstalled(*jenkinsURL, *jenkinsUser, *jenkinsToken, *pluginName)
+	installed, err := isPluginInstalled(envMap["JENKINS_URL"], envMap["JENKINS_USER"], envMap["JENKINS_TOKEN"], envMap["PLUGIN_NAME"])
 	if err != nil {
 		fmt.Println("Error checking installation:", err)
 	} else if installed {
